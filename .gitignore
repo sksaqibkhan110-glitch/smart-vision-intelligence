@@ -1,6 +1,18 @@
-venv/
+# Python cache & virtual environment
 __pycache__/
+*.pyc
+venv/
+.env
+
+# Authorized face profiles & database
+data/authorized/
+data/alerts/
+data/siren.mp3
+*.db
+*.sqlite3
+*.pkl
+temp_test.jpg
+
+# Weights & models
 *.pt
-data/alerts/*.jpg
-data/surveillance.db
-.vscode/
+*.h5

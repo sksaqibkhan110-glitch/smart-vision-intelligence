@@ -1,35 +1,37 @@
-# Smart Vision Intelligence
+# 🛡️ Smart Vision Intelligence: Edge AI Multi-Zone Threat Detection & Telemetry Platform
 
-A real-time security surveillance and computer vision application that detects zone intrusions, saves incident snapshots, and provides an analytics dashboard.
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
+[![YOLOv8](https://img.shields.io/badge/YOLOv8-Computer_Vision-00FFFF?style=flat&logo=ultralytics)](https://github.com/ultralytics/ultralytics)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io)
 
-Built using YOLOv8, OpenCV, FastAPI, and Streamlit.
-
----
-
-## Features
-
-* **Restricted Zone Detection:** Highlights a security polygon on the live camera stream and detects when a person crosses into the boundary.
-* **Incident Logging & Snapshots:** Saves breach images automatically to disk with a 3-second cooldown buffer and logs metadata into a SQLite database.
-* **REST API:** FastAPI backend to fetch logged breaches and summary analytics via JSON endpoints.
-* **Interactive Dashboard:** Streamlit UI to monitor live incident metrics, hourly trends, and captured evidence snapshots.
-* **Video File Testing:** Allows running detection on pre-recorded CCTV clips directly from the interface.
+An end-to-end edge AI surveillance and incident response system combining real-time computer vision (YOLOv8), multi-zone spatial threat evaluation, automated async audio/Telegram alerting, SQLite audit telemetry, and a Security Operations Center (SOC) dashboard.
 
 ---
 
-## Project Structure
+## 🏛️ System Architecture
 
 ```text
-smart-vision-intelligence/
-├── data/
-│   ├── alerts/            # Saved breach snapshots
-│   └── surveillance.db    # SQLite database
-├── src/
-│   ├── api.py             # FastAPI backend endpoints
-│   ├── database.py        # SQLite connection and queries
-│   ├── detector.py        # Core YOLOv8 live stream processor
-│   └── stream_processor.py# Video file processing module
-├── app.py                 # Streamlit telemetry dashboard
-├── main.py                # Live camera entry point
-├── Dockerfile             # Container configuration
-├── docker-compose.yml     # Multi-service setup
-└── requirements.txt       # Project dependencies
+[ Live Camera Feed / Video Stream ]
+                │
+                ▼
+┌───────────────────────────────────────────────┐
+│           FastAPI Edge Engine (src/api.py)    │
+│  ┌─────────────────────────────────────────┐  │
+│  │ VisionDetector (YOLOv8n + Zone Check)   │  │
+│  └──────────────────┬──────────────────────┘  │
+│                     │                         │
+│        ┌────────────┴─────────────┐           │
+│        ▼                          ▼           │
+│  [ SQLite DB ]            [ Threaded Alert ]  │
+│  (Audit Telemetry)        ├── Siren Sound     │
+│                           └── Telegram Bot    │
+└───────────────────────┬───────────────────────┘
+                        │ MJPEG Stream & REST Endpoints
+                        ▼
+┌───────────────────────────────────────────────┐
+│     Streamlit SOC Dashboard (app.py)          │
+│   • 🔴 Real-Time Vision Feed with Overlay HUD │
+│   • 📊 Threat Analytics & Incident Charts     │
+│   • 📁 Breach Audit Logs & Forensic Records   │
+└───────────────────────────────────────────────┘
