@@ -7,6 +7,7 @@ import numpy as np
 import pygame
 from ultralytics import YOLO
 from src.database import AlertDatabase
+from src.notifier import trigger_alert
 
 class VisionDetector:
     def __init__(self, model_path="yolov8n.pt"):
@@ -37,11 +38,9 @@ class VisionDetector:
             "suitcase": "Baggage"
         }
 
-        # Default Zone Coordinates
         self.warning_zone = np.array([[40, 145], [280, 145], [280, 455], [40, 455]], np.int32)
         self.critical_zone = np.array([[360, 145], [600, 145], [600, 455], [360, 455]], np.int32)
         
-        # Calibration state
         self.edit_mode = 0  # 0: None, 1: Zone 1, 2: Zone 2
         self.temp_points = []
         self.prev_frame_time = 0
@@ -82,7 +81,6 @@ class VisionDetector:
         cv2.rectangle(blended, (360, 120), (525, 144), (20, 20, 20), -1)
         cv2.putText(blended, "ZONE 2: CRITICAL", (365, 137), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1)
         
-        # Show points currently being drawn
         for pt in self.temp_points:
             cv2.circle(blended, tuple(pt), 5, (0, 255, 255), -1)
             
@@ -106,7 +104,6 @@ class VisionDetector:
 
         cv2.putText(img, f"Threat: {txt}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.46, col, 2)
 
-        # Calibration status banner
         if self.edit_mode == 1:
             calib_msg = f"CALIBRATING ZONE 1: Click {4 - len(self.temp_points)} pts"
             cv2.putText(img, calib_msg, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 215, 255), 1)
@@ -169,6 +166,11 @@ class VisionDetector:
                 img_name = f"{self.storage_dir}/critical_{int(now)}.jpg"
                 cv2.imwrite(img_name, frame)
                 self.db_manager.log_alert("critical_zone_breach", highest_conf, img_name)
+                
+                # Instant Alert Dispatch via Background Thread
+                primary_item = active_items[0] if active_items else "Unknown Intruder"
+                trigger_alert("CRITICAL (Zone 2)", primary_item, highest_conf, img_name)
+                
                 self.last_capture_ts = now
         elif threat_level == "WARNING":
             if now - self.last_capture_ts > self.cooldown_sec:
