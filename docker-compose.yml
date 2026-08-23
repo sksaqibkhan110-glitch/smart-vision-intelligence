@@ -1,12 +1,28 @@
 version: '3.8'
 
 services:
-  surveillance-engine:
+  # Microservice 1: FastAPI Edge Vision & Telemetry Engine
+  backend:
     build: .
-    container_name: vision_analytics_service
+    container_name: vision_backend
+    restart: always
+    command: uvicorn src.api:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
-      - "8501:8501"
     volumes:
       - ./data:/app/data
-    restart: unless-stopped
+    devices:
+      - "/dev/video0:/dev/video0" # Passthrough for host webcam (Linux)
+
+  # Microservice 2: Streamlit Security SOC Dashboard
+  dashboard:
+    build: .
+    container_name: vision_soc_dashboard
+    restart: always
+    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE=http://backend:8000
+    depends_on:
+      - backend
