@@ -19,83 +19,165 @@ class VisionDetector:
         os.makedirs(self.storage_dir, exist_ok=True)
 
         pygame.mixer.init()
+        self.alert_sound = None
+        if os.path.exists(self.sound_file):
+            try:
+                self.alert_sound = pygame.mixer.Sound(self.sound_file)
+            except Exception:
+                self.alert_sound = None
 
-        self.custom_points = []
-        self.roi_poly = np.array([[300, 100], [620, 100], [620, 460], [300, 460]], np.int32)
+        self.target_classes = {
+            "person": "Person",
+            "cell phone": "Electronic Device",
+            "remote": "Electronic Device",
+            "laptop": "Electronic Device",
+            "tv": "Display Screen",
+            "backpack": "Baggage",
+            "handbag": "Baggage",
+            "suitcase": "Baggage"
+        }
+
+        # Default Zone Coordinates
+        self.warning_zone = np.array([[40, 145], [280, 145], [280, 455], [40, 455]], np.int32)
+        self.critical_zone = np.array([[360, 145], [600, 145], [600, 455], [360, 455]], np.int32)
+        
+        # Calibration state
+        self.edit_mode = 0  # 0: None, 1: Zone 1, 2: Zone 2
+        self.temp_points = []
         self.prev_frame_time = 0
 
     def _play_siren(self):
         try:
-            if os.path.exists(self.sound_file):
-                pygame.mixer.music.load(self.sound_file)
-                pygame.mixer.music.play()
+            if self.alert_sound:
+                self.alert_sound.play()
         except Exception:
             pass
 
-    def _check_point_in_zone(self, pt):
-        return cv2.pointPolygonTest(self.roi_poly, pt, False) >= 0
-
     def mouse_callback(self, event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if len(self.custom_points) >= 4:
-                self.custom_points = []
-            self.custom_points.append([x, y])
-            if len(self.custom_points) == 4:
-                self.roi_poly = np.array(self.custom_points, np.int32)
+        if event == cv2.EVENT_LBUTTONDOWN and self.edit_mode in [1, 2]:
+            self.temp_points.append([x, y])
+            if len(self.temp_points) == 4:
+                if self.edit_mode == 1:
+                    self.warning_zone = np.array(self.temp_points, np.int32)
+                elif self.edit_mode == 2:
+                    self.critical_zone = np.array(self.temp_points, np.int32)
+                
+                self.temp_points = []
+                self.edit_mode = 0
 
-    def _render_hud(self, img, fps, person_count, breach_active):
-        h, w, _ = img.shape
-        cv2.rectangle(img, (10, 10), (260, 100), (20, 20, 20), -1)
-        cv2.rectangle(img, (10, 10), (260, 100), (80, 80, 80), 1)
+    def _render_zones(self, frame):
+        overlay = frame.copy()
+        
+        cv2.polylines(frame, [self.warning_zone], True, (0, 215, 255), 2)
+        cv2.fillPoly(overlay, [self.warning_zone], (0, 215, 255))
+        
+        cv2.polylines(frame, [self.critical_zone], True, (0, 0, 255), 2)
+        cv2.fillPoly(overlay, [self.critical_zone], (0, 0, 255))
+        
+        blended = cv2.addWeighted(overlay, 0.18, frame, 0.82, 0)
+        
+        cv2.rectangle(blended, (40, 120), (200, 144), (20, 20, 20), -1)
+        cv2.putText(blended, "ZONE 1: CAUTION", (45, 137), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 215, 255), 1)
 
-        cv2.putText(img, f"FPS: {fps:.1f}", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1)
-        cv2.putText(img, f"Persons In Frame: {person_count}", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+        cv2.rectangle(blended, (360, 120), (525, 144), (20, 20, 20), -1)
+        cv2.putText(blended, "ZONE 2: CRITICAL", (365, 137), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1)
+        
+        # Show points currently being drawn
+        for pt in self.temp_points:
+            cv2.circle(blended, tuple(pt), 5, (0, 255, 255), -1)
+            
+        return blended
 
-        threat_color = (0, 0, 255) if breach_active else (0, 255, 0)
-        threat_text = "CRITICAL (BREACH)" if breach_active else "NORMAL"
-        cv2.putText(img, f"Threat Status: {threat_text}", (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, threat_color, 2)
+    def _render_hud(self, img, fps, threat_level, active_entities):
+        cv2.rectangle(img, (10, 10), (320, 115), (15, 15, 15), -1)
+        cv2.rectangle(img, (10, 10), (320, 115), (70, 70, 70), 1)
+
+        cv2.putText(img, f"FPS: {fps:.1f}", (20, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+        
+        entity_str = ", ".join(active_entities) if active_entities else "None"
+        cv2.putText(img, f"Tracked: {entity_str}", (20, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1)
+
+        if threat_level == "CRITICAL":
+            col, txt = (0, 0, 255), "LEVEL 2: CRITICAL BREACH"
+        elif threat_level == "WARNING":
+            col, txt = (0, 215, 255), "LEVEL 1: WARNING"
+        else:
+            col, txt = (0, 255, 0), "LEVEL 0: SECURE"
+
+        cv2.putText(img, f"Threat: {txt}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.46, col, 2)
+
+        # Calibration status banner
+        if self.edit_mode == 1:
+            calib_msg = f"CALIBRATING ZONE 1: Click {4 - len(self.temp_points)} pts"
+            cv2.putText(img, calib_msg, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 215, 255), 1)
+        elif self.edit_mode == 2:
+            calib_msg = f"CALIBRATING ZONE 2: Click {4 - len(self.temp_points)} pts"
+            cv2.putText(img, calib_msg, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 255), 1)
+        else:
+            cv2.putText(img, "Calib: [1] Zone 1  [2] Zone 2  [R] Reset", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
 
     def process_frame(self, frame):
         new_frame_time = time.time()
         fps = 1 / (new_frame_time - self.prev_frame_time) if self.prev_frame_time > 0 else 30.0
         self.prev_frame_time = new_frame_time
 
-        overlay = frame.copy()
-        cv2.polylines(frame, [self.roi_poly], True, (0, 0, 255), 2)
-        cv2.fillPoly(overlay, [self.roi_poly], (0, 0, 255))
-        blended = cv2.addWeighted(overlay, 0.2, frame, 0.8, 0)
-
-        predictions = self.detector(frame, stream=True, verbose=False)
-        breach_flag = False
-        peak_confidence = 0.0
-        person_count = 0
+        blended = self._render_zones(frame)
+        predictions = self.detector(frame, stream=True, verbose=False, conf=0.35)
+        
+        threat_level = "SECURE"
+        highest_conf = 0.0
+        active_items = []
         now = time.time()
 
         for pred in predictions:
-            blended = pred.plot()
             for b in pred.boxes:
                 cls_idx = int(b.cls[0])
-                entity_type = self.detector.names[cls_idx]
+                raw_label = self.detector.names[cls_idx]
                 score = float(b.conf[0])
+                x1, y1, x2, y2 = map(int, b.xyxy[0])
 
-                if entity_type == "person":
-                    person_count += 1
-                    x1, y1, x2, y2 = map(int, b.xyxy[0])
-                    base_point = (int((x1 + x2) / 2), y2)
+                center_pt = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+                
+                in_critical = cv2.pointPolygonTest(self.critical_zone, center_pt, False) >= 0
+                in_warning = cv2.pointPolygonTest(self.warning_zone, center_pt, False) >= 0
 
-                    if self._check_point_in_zone(base_point):
-                        breach_flag = True
-                        if score > peak_confidence:
-                            peak_confidence = score
+                if raw_label in self.target_classes:
+                    display_tag = self.target_classes[raw_label]
+                    active_items.append(raw_label)
 
-        if breach_flag and (now - self.last_capture_ts > self.cooldown_sec):
-            threading.Thread(target=self._play_siren, daemon=True).start()
-            img_name = f"{self.storage_dir}/breach_{int(now)}.jpg"
-            cv2.imwrite(img_name, frame)
-            self.db_manager.log_alert("zone_intrusion", peak_confidence, img_name)
-            self.last_capture_ts = now
+                    if in_critical:
+                        threat_level = "CRITICAL"
+                        if score > highest_conf:
+                            highest_conf = score
+                        cv2.rectangle(blended, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                        cv2.rectangle(blended, (x1, y2 - 20), (x1 + 140, y2), (0, 0, 255), -1)
+                        cv2.putText(blended, f"{display_tag} {score:.2f}", (x1 + 4, y2 - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+                    elif in_warning:
+                        if threat_level != "CRITICAL":
+                            threat_level = "WARNING"
+                        if score > highest_conf:
+                            highest_conf = score
+                        cv2.rectangle(blended, (x1, y1), (x2, y2), (0, 215, 255), 2)
+                        cv2.rectangle(blended, (x1, y2 - 20), (x1 + 140, y2), (0, 215, 255), -1)
+                        cv2.putText(blended, f"{display_tag} {score:.2f}", (x1 + 4, y2 - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 1)
 
-        self._render_hud(blended, fps, person_count, breach_flag)
+        if threat_level == "CRITICAL":
+            if now - self.last_capture_ts > self.cooldown_sec:
+                threading.Thread(target=self._play_siren, daemon=True).start()
+                img_name = f"{self.storage_dir}/critical_{int(now)}.jpg"
+                cv2.imwrite(img_name, frame)
+                self.db_manager.log_alert("critical_zone_breach", highest_conf, img_name)
+                self.last_capture_ts = now
+        elif threat_level == "WARNING":
+            if now - self.last_capture_ts > self.cooldown_sec:
+                img_name = f"{self.storage_dir}/warning_{int(now)}.jpg"
+                cv2.imwrite(img_name, frame)
+                self.db_manager.log_alert("warning_zone_entry", highest_conf, img_name)
+                self.last_capture_ts = now
+
+        self._render_hud(blended, fps, threat_level, list(set(active_items)))
         return blended
 
     def run_live_feed(self):
@@ -103,7 +185,7 @@ class VisionDetector:
         if not stream.isOpened():
             return
 
-        window_name = "Smart Vision Intelligence"
+        window_name = "Smart Vision Intelligence - Multi Zone"
         cv2.namedWindow(window_name)
         cv2.setMouseCallback(window_name, self.mouse_callback)
 
@@ -118,9 +200,17 @@ class VisionDetector:
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
+            elif key == ord('1'):
+                self.edit_mode = 1
+                self.temp_points = []
+            elif key == ord('2'):
+                self.edit_mode = 2
+                self.temp_points = []
             elif key == ord('r'):
-                self.roi_poly = np.array([[300, 100], [620, 100], [620, 460], [300, 460]], np.int32)
-                self.custom_points = []
+                self.warning_zone = np.array([[40, 145], [280, 145], [280, 455], [40, 455]], np.int32)
+                self.critical_zone = np.array([[360, 145], [600, 145], [600, 455], [360, 455]], np.int32)
+                self.edit_mode = 0
+                self.temp_points = []
 
         stream.release()
         cv2.destroyAllWindows()
