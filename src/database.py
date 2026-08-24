@@ -1,54 +1,62 @@
 import sqlite3
-import datetime
-from collections import Counter
+import os
+from datetime import datetime
 
 class AlertDatabase:
-    def __init__(self, db_path="data/telemetry.db"):
+    def __init__(self, db_path="data/alerts.db"):
         self.db_path = db_path
-        self._init_db()
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self.init_db()
 
-    def _get_connection(self):
-        return sqlite3.connect(self.db_path, check_same_thread=False)
-
-    def _init_db(self):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS security_logs (
+    def init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    threat_type TEXT NOT NULL,
-                    confidence REAL NOT NULL,
+                    timestamp TEXT,
+                    threat_type TEXT,
+                    confidence REAL,
                     snapshot_path TEXT
                 )
             """)
             conn.commit()
 
-    def log_alert(self, threat_type: str, confidence: float, snapshot_path: str = None):
-        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO security_logs (timestamp, threat_type, confidence, snapshot_path)
-                VALUES (?, ?, ?, ?)
-            """, (ts, threat_type, confidence, snapshot_path))
+    def log_alert(self, threat_type, confidence, snapshot_path):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO alerts (timestamp, threat_type, confidence, snapshot_path) VALUES (?, ?, ?, ?)",
+                (now, threat_type, float(confidence), snapshot_path)
+            )
             conn.commit()
 
-    def fetch_recent_alerts(self, limit: int = 15):
-        with self._get_connection() as conn:
+    def fetch_recent_alerts(self, limit=15):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, timestamp, threat_type, confidence, snapshot_path 
-                FROM security_logs 
-                ORDER BY id DESC 
-                LIMIT ?
-            """, (limit,))
-            return cursor.fetchall()
+            cursor.execute("SELECT id, timestamp, threat_type, confidence, snapshot_path FROM alerts ORDER BY id DESC LIMIT ?", (limit,))
+            return [dict(row) for row in cursor.fetchall()]
 
-    def get_threat_analytics(self):
-        with self._get_connection() as conn:
+    def fetch_analytics_summary(self):
+        with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT threat_type FROM security_logs")
-            rows = cursor.fetchall()
-            counts = Counter([r[0] for r in rows])
-            return dict(counts)
+            cursor.execute("SELECT COUNT(*) FROM alerts")
+            total = cursor.fetchone()[0] or 0
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            cursor.execute("SELECT COUNT(*) FROM alerts WHERE timestamp LIKE ?", (f"{today}%",))
+            today_count = cursor.fetchone()[0] or 0
+
+            cursor.execute("SELECT timestamp FROM alerts ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            last_ts = row[0] if row else "N/A"
+
+            cursor.execute("SELECT threat_type, COUNT(*) FROM alerts GROUP BY threat_type")
+            breakdown = {threat: count for threat, count in cursor.fetchall()}
+
+            return {
+                "total_alerts": total,
+                "threats_today": today_count,
+                "last_alert_time": last_ts,
+                "threat_breakdown": breakdown
+            }
