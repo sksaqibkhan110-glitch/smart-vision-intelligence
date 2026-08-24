@@ -6,6 +6,7 @@ from ultralytics import YOLO
 from src.database import AlertDatabase
 from src.notifier import AlertNotifier
 from src.face_engine import FaceEngine
+from src.zone_config import load_zones
 
 class VisionDetector:
     def __init__(self, model_path="yolov8n.pt"):
@@ -14,9 +15,12 @@ class VisionDetector:
         self.notifier = AlertNotifier()
         self.face_engine = FaceEngine()
         
-        # Spatial Multi-Zone Definition (Ratios)
-        self.z1_x_min, self.z1_x_max = 0.0, 0.40   # Caution Zone (Left)
-        self.z2_x_min, self.z2_x_max = 0.60, 1.0   # Critical Zone (Right)
+        # Dynamic Spatial Multi-Zone Definition from JSON
+        zones = load_zones()
+        self.z1_x_min = zones["zone1_caution"]["x_min"]
+        self.z1_x_max = zones["zone1_caution"]["x_max"]
+        self.z2_x_min = zones["zone2_critical"]["x_min"]
+        self.z2_x_max = zones["zone2_critical"]["x_max"]
         
         self.target_classes = {0: "Person", 67: "Cell Phone", 24: "Backpack"}
         self.last_alert_time = 0
@@ -24,7 +28,6 @@ class VisionDetector:
 
         # Performance Caching
         self.frame_count = 0
-        self.auth_cache = {}  # Cache recent verification results
         self.last_verified_status = "UNKNOWN"
         self.is_checking_face = False
 
@@ -49,11 +52,11 @@ class VisionDetector:
         results = self.model(frame, verbose=False)[0]
 
         # Draw Zone Overlays
-        cv2.rectangle(frame, (0, 0), (int(w * 0.40), h), (0, 255, 255), 2)
+        cv2.rectangle(frame, (0, 0), (int(w * self.z1_x_max), h), (0, 255, 255), 2)
         cv2.putText(frame, "ZONE 1: CAUTION", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        cv2.rectangle(frame, (int(w * 0.60), 0), (w, h), (0, 0, 255), 2)
-        cv2.putText(frame, "ZONE 2: CRITICAL", (int(w * 0.60) + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        cv2.rectangle(frame, (int(w * self.z2_x_min), 0), (w, h), (0, 0, 255), 2)
+        cv2.putText(frame, "ZONE 2: CRITICAL", (int(w * self.z2_x_min) + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         for box in results.boxes:
             cls_id = int(box.cls[0].item())
@@ -68,11 +71,10 @@ class VisionDetector:
                 is_authorized = False
                 display_label = f"{self.target_classes[cls_id]} {conf:.2f}"
 
-                # Person Face Verification (Async / Every 15th frame)
+                # Person Face Verification (Async)
                 if cls_id == 0:
                     crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
                     if crop.size > 0:
-                        # Non-blocking async check trigger
                         if self.frame_count % 12 == 0 and not self.is_checking_face:
                             self.is_checking_face = True
                             threading.Thread(target=self._verify_async, args=(crop.copy(),), daemon=True).start()
@@ -90,7 +92,7 @@ class VisionDetector:
                 cv2.putText(frame, full_tag, (x1, max(25, y1 - 10)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, zone_color, 2)
 
-                # Critical Zone Escalation (Alert only for real intruders)
+                # Critical Zone Escalation
                 if zone_label == "ZONE 2 (CRITICAL)" and not is_authorized:
                     current_time = time.time()
                     if current_time - self.last_alert_time > self.cooldown_sec:
