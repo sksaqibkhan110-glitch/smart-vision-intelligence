@@ -1,6 +1,7 @@
 # 🛡️ Smart Vision Intelligence: Edge AI Multi-Zone Threat Detection & Telemetry Platform
 
 
+
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-Computer_Vision-00FFFF?style=flat&logo=ultralytics)](https://github.com/ultralytics/ultralytics)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
