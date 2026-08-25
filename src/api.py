@@ -6,15 +6,15 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 from src.detector import VisionDetector
 from src.database import AlertDatabase
 from src.face_engine import FaceEngine
-from src.zone_config import load_zones, save_zones
+from src.zone_config import load_zones, save_zones, save_polygon_zones
 from src.camera import get_camera
 
-app = FastAPI(title="Smart Vision Intelligence API")
+app = FastAPI(title="Smart Vision Intelligence API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +36,10 @@ def get_detector() -> VisionDetector:
 class ZoneUpdateRequest(BaseModel):
     caution_max: float
     critical_min: float
+
+class PolygonUpdateRequest(BaseModel):
+    zone1_poly: List[List[int]]
+    zone2_poly: List[List[int]]
 
 def generate_frames():
     cam = get_camera()
@@ -62,7 +66,7 @@ def generate_frames():
 
 @app.get("/")
 def root():
-    return {"status": "online"}
+    return {"status": "online", "message": "Smart Vision Intelligence Server Running"}
 
 @app.get("/video_feed")
 def video_feed():
@@ -73,11 +77,19 @@ def video_feed():
 
 @app.get("/alerts")
 def get_alerts(limit: int = 15):
-    return {"status": "success", "alerts": db.fetch_recent_alerts(limit)}
+    try:
+        logs = db.fetch_recent_alerts(limit)
+        return {"status": "success", "alerts": logs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/analytics")
 def get_analytics():
-    return {"status": "success", "analytics": db.fetch_analytics_summary()}
+    try:
+        stats = db.fetch_analytics_summary()
+        return {"status": "success", "analytics": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/zones")
 def get_zones():
@@ -87,8 +99,14 @@ def get_zones():
 def update_zones(req: ZoneUpdateRequest):
     saved = save_zones(req.caution_max, req.critical_min)
     detector = get_detector()
-    detector.z1_x_max = saved["zone1_caution"]["x_max"]
-    detector.z2_x_min = saved["zone2_critical"]["x_min"]
+    detector.reload_zones()
+    return {"status": "success", "zones": saved}
+
+@app.post("/zones_polygon")
+def update_polygon_zones(req: PolygonUpdateRequest):
+    saved = save_polygon_zones(req.zone1_poly, req.zone2_poly)
+    detector = get_detector()
+    detector.reload_zones()
     return {"status": "success", "zones": saved}
 
 @app.post("/register_member")
@@ -103,6 +121,6 @@ async def register_member(name: str = Form(...), file: UploadFile = File(...)):
             
         detector = get_detector()
         detector.face_engine = FaceEngine()
-        return {"status": "success", "message": f"Member {clean_name} enrolled."}
+        return {"status": "success", "message": f"Member {clean_name} enrolled successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

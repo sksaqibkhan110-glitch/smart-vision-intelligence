@@ -2,6 +2,7 @@ import cv2
 import time
 import os
 import threading
+import numpy as np
 from ultralytics import YOLO
 from src.database import AlertDatabase
 from src.notifier import AlertNotifier
@@ -17,33 +18,57 @@ class VisionDetector:
         self.face_engine = FaceEngine()
         self.liveness = LivenessDetector()
         
-        zones = load_zones()
-        self.z1_x_min = zones["zone1_caution"]["x_min"]
-        self.z1_x_max = zones["zone1_caution"]["x_max"]
-        self.z2_x_min = zones["zone2_critical"]["x_min"]
-        self.z2_x_max = zones["zone2_critical"]["x_max"]
+        self.reload_zones()
         
-        self.target_classes = {0: "Person", 67: "Cell Phone", 24: "Backpack"}
-        self.last_alert_time = 0
-        self.cooldown_sec = 6
-        self.frame_count = 0
-        self.last_verified_status = "UNKNOWN"
-        self.is_checking_face = False
+        self.target_classes = {
+            0: "Person", 67: "Cell Phone", 24: "Backpack", 43: "Knife", 76: "Scissors", 77: "Teddy Bear"
+        }
 
-    def get_spatial_zone(self, cx, width):
-        norm_x = cx / width
-        if norm_x <= self.z1_x_max:
-            return "ZONE 1 (CAUTION)", (0, 255, 255)
-        elif norm_x >= self.z2_x_min:
+        self.last_alert_time = 0
+        self.cooldown_sec = 3.0
+        self.frame_count = 0
+        
+        self.face_cache = {}
+        self.checking_boxes = set()
+        
+        # Caution Continuous Trigger State
+        self.caution_entry_time = None
+        self.last_unauthorized_seen = 0
+        self.caution_limit_sec = 3.0
+        self.grace_period_sec = 1.2
+        self.caution_alarm_active = False  # True once breached until zone is fully cleared
+
+    def reload_zones(self):
+        zones = load_zones()
+        self.z1_poly = np.array(zones.get("zone1_caution", {}).get("polygon", []), dtype=np.int32)
+        self.z2_poly = np.array(zones.get("zone2_critical", {}).get("polygon", []), dtype=np.int32)
+        self.z1_x_max = zones.get("zone1_caution", {}).get("x_max", 0.40)
+        self.z2_x_min = zones.get("zone2_critical", {}).get("x_min", 0.60)
+
+    def check_point_in_zone(self, cx, cy, w, h):
+        if len(self.z2_poly) >= 3:
+            if cv2.pointPolygonTest(self.z2_poly, (float(cx), float(cy)), False) >= 0:
+                return "ZONE 2 (CRITICAL)", (0, 0, 255)
+        elif cx / w >= self.z2_x_min:
             return "ZONE 2 (CRITICAL)", (0, 0, 255)
+
+        if len(self.z1_poly) >= 3:
+            if cv2.pointPolygonTest(self.z1_poly, (float(cx), float(cy)), False) >= 0:
+                return "ZONE 1 (CAUTION)", (0, 255, 255)
+        elif cx / w <= self.z1_x_max:
+            return "ZONE 1 (CAUTION)", (0, 255, 255)
+
         return "SECURE ZONE", (0, 255, 0)
 
-    def _verify_async(self, crop):
+    def _verify_individual_face(self, crop, box_id):
         try:
             is_auth, name_label = self.face_engine.match_face(crop)
-            self.last_verified_status = name_label if is_auth else "INTRUDER"
+            status = name_label if is_auth else "INTRUDER"
+            self.face_cache[box_id] = (status, time.time())
+        except Exception:
+            self.face_cache[box_id] = ("INTRUDER", time.time())
         finally:
-            self.is_checking_face = False
+            self.checking_boxes.discard(box_id)
 
     def process_frame(self, frame):
         if frame is None or frame.size == 0:
@@ -51,69 +76,147 @@ class VisionDetector:
 
         self.frame_count += 1
         h, w, _ = frame.shape
-        results = self.model(frame, verbose=False)[0]
+        now = time.time()
 
+        results = self.model(frame, conf=0.20, iou=0.40, verbose=False)[0]
         is_live, _, blinks = self.liveness.check_liveness(frame)
 
-        # Draw Clear Single Line Boundaries
-        z1_w = int(w * self.z1_x_max)
-        z2_w = int(w * self.z2_x_min)
-        cv2.line(frame, (z1_w, 0), (z1_w, h), (0, 255, 255), 2)
-        cv2.putText(frame, "ZONE 1 (CAUTION)", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        # Draw Zones
+        if len(self.z1_poly) >= 3:
+            cv2.polylines(frame, [self.z1_poly], isClosed=True, color=(0, 255, 255), thickness=2)
+            cv2.putText(frame, "ZONE 1 (CAUTION)", (int(self.z1_poly[0][0]), max(25, int(self.z1_poly[0][1]))),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        else:
+            z1_w = int(w * self.z1_x_max)
+            cv2.line(frame, (z1_w, 0), (z1_w, h), (0, 255, 255), 2)
+            cv2.putText(frame, "ZONE 1 (CAUTION)", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        cv2.line(frame, (z2_w, 0), (z2_w, h), (0, 0, 255), 2)
-        cv2.putText(frame, "ZONE 2 (CRITICAL)", (z2_w + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        if len(self.z2_poly) >= 3:
+            cv2.polylines(frame, [self.z2_poly], isClosed=True, color=(0, 0, 255), thickness=2)
+            cv2.putText(frame, "ZONE 2 (CRITICAL)", (int(self.z2_poly[0][0]), max(25, int(self.z2_poly[0][1]))),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        else:
+            z2_w = int(w * self.z2_x_min)
+            cv2.line(frame, (z2_w, 0), (z2_w, h), (0, 0, 255), 2)
+            cv2.putText(frame, "ZONE 2 (CRITICAL)", (z2_w + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        for box in results.boxes:
-            cls_id = int(box.cls[0].item())
-            conf = float(box.conf[0].item())
-            min_thresh = 0.25 if cls_id == 67 else 0.40
+        unauthorized_in_caution = False
+        active_threat_name = "UNAUTHORIZED_OBJECT"
 
-            if cls_id in self.target_classes and conf > min_thresh:
+        if results.boxes is not None and len(results.boxes) > 0:
+            for box in results.boxes:
+                cls_id = int(box.cls[0].item())
+                conf = float(box.conf[0].item())
+
+                if cls_id not in self.target_classes:
+                    continue
+
+                if cls_id == 0 and conf < 0.40:
+                    continue
+
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 cx = (x1 + x2) // 2
                 cy = (y1 + y2) // 2
-                
-                zone_label, zone_color = self.get_spatial_zone(cx, w)
-                is_authorized = False
-                display_label = f"{self.target_classes[cls_id]} {conf:.2f}"
 
+                zone_label, zone_color = self.check_point_in_zone(cx, cy, w, h)
+                obj_name = self.target_classes.get(cls_id, f"Item_{cls_id}")
+                display_label = f"{obj_name} {conf:.2f}"
+                is_this_item_authorized = False
+
+                # Person Handling
                 if cls_id == 0:
                     crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
-                    if crop.size > 0:
-                        if self.frame_count % 10 == 0 and not self.is_checking_face:
-                            self.is_checking_face = True
-                            threading.Thread(target=self._verify_async, args=(crop.copy(),), daemon=True).start()
+                    box_key = f"{int(cx/60)}_{int(cy/60)}"
 
-                        if "AUTHORIZED" in self.last_verified_status:
+                    if crop.size > 0:
+                        cached_entry = self.face_cache.get(box_key)
+                        if cached_entry is None or (now - cached_entry[1] > 2.5):
+                            if box_key not in self.checking_boxes:
+                                self.checking_boxes.add(box_key)
+                                threading.Thread(target=self._verify_individual_face, args=(crop.copy(), box_key), daemon=True).start()
+
+                        person_status = self.face_cache.get(box_key, ("VERIFYING...", 0))[0]
+
+                        if "AUTHORIZED" in person_status:
                             if is_live:
-                                is_authorized = True
-                                display_label = f"{self.last_verified_status} [LIVE: {blinks}]"
+                                is_this_item_authorized = True
+                                display_label = f"{person_status} [LIVE: {blinks}]"
                                 zone_color = (0, 255, 0)
                             else:
-                                display_label = f"{self.last_verified_status} [BLINK NEEDED]"
+                                display_label = f"{person_status} [BLINK NEEDED]"
                                 zone_color = (0, 255, 255)
+                        elif person_status == "VERIFYING...":
+                            display_label = f"VERIFYING... ({conf:.2f})"
+                            zone_color = (0, 255, 255)
                         else:
                             display_label = f"INTRUDER ({conf:.2f})"
+                            if zone_label == "ZONE 2 (CRITICAL)":
+                                zone_color = (0, 0, 255)
                 else:
-                    is_authorized = False
+                    is_this_item_authorized = False
                     if zone_label == "ZONE 2 (CRITICAL)":
                         zone_color = (0, 0, 255)
 
+                # Caution Zone Check
+                if zone_label == "ZONE 1 (CAUTION)" and not is_this_item_authorized:
+                    unauthorized_in_caution = True
+                    active_threat_name = obj_name
+                    self.last_unauthorized_seen = now
+
+                # Draw Detection Box
                 full_tag = f"{display_label} | {zone_label}"
                 cv2.rectangle(frame, (x1, y1), (x2, y2), zone_color, 2)
                 cv2.circle(frame, (cx, cy), 4, zone_color, -1)
                 cv2.putText(frame, full_tag, (x1, max(25, y1 - 10)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, zone_color, 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, zone_color, 2)
 
-                if zone_label == "ZONE 2 (CRITICAL)" and not is_authorized:
-                    current_time = time.time()
-                    if current_time - self.last_alert_time > self.cooldown_sec:
-                        self.last_alert_time = current_time
-                        snap_path = f"data/alerts/breach_{int(current_time)}.jpg"
+                # Zone 2 Instant Escalation
+                if zone_label == "ZONE 2 (CRITICAL)" and not is_this_item_authorized:
+                    if now - self.last_alert_time > self.cooldown_sec:
+                        self.last_alert_time = now
+                        snap_path = f"data/alerts/breach_{int(now)}.jpg"
                         cv2.imwrite(snap_path, frame)
-                        threat_desc = f"UNAUTHORIZED_{self.target_classes[cls_id].upper()}"
+                        threat_desc = f"CRITICAL_BREACH_{obj_name.upper()}"
                         self.db.log_alert(threat_desc, conf, snap_path)
                         self.notifier.dispatch_alert(threat_desc, conf, snap_path)
+
+        # Zone 1 Continuous Threat State Logic
+        is_caution_occupied = unauthorized_in_caution or (now - self.last_unauthorized_seen < self.grace_period_sec)
+
+        if is_caution_occupied:
+            if self.caution_entry_time is None:
+                self.caution_entry_time = now
+
+            elapsed = now - self.caution_entry_time
+            remaining = max(0, int(self.caution_limit_sec - elapsed + 0.99))
+
+            # Agar alarm trigger ho chuka hai ya 3s cross ho chuke hain
+            if self.caution_alarm_active or elapsed >= self.caution_limit_sec:
+                self.caution_alarm_active = True
+
+                # Flashing Red Alert Header
+                cv2.rectangle(frame, (10, 45), (370, 85), (0, 0, 0), -1)
+                cv2.rectangle(frame, (10, 45), (370, 85), (0, 0, 255), 2)
+                cv2.putText(frame, "🚨 ACTIVE THREAT IN CAUTION ZONE!", (18, 72),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+
+                # Continuous Siren + Snapshots dispatch every cooldown interval
+                if now - self.last_alert_time > self.cooldown_sec:
+                    self.last_alert_time = now
+                    snap_path = f"data/alerts/loiter_{int(now)}.jpg"
+                    cv2.imwrite(snap_path, frame)
+                    threat_desc = f"PERSISTENT_THREAT_{active_threat_name.upper()}"
+                    self.db.log_alert(threat_desc, 0.95, snap_path)
+                    self.notifier.dispatch_alert(threat_desc, 0.95, snap_path)
+            else:
+                # Countdown phase (before alarm locks)
+                cv2.rectangle(frame, (10, 45), (330, 85), (0, 0, 0), -1)
+                cv2.rectangle(frame, (10, 45), (330, 85), (0, 0, 255), 2)
+                cv2.putText(frame, f"CAUTION COUNTDOWN: {remaining}s", (20, 72),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+        else:
+            # Person/Object poori tarah bahar chala gaya -> State Reset
+            self.caution_entry_time = None
+            self.caution_alarm_active = False
 
         return frame
