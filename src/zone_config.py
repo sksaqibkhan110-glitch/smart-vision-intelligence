@@ -7,12 +7,12 @@ DEFAULT_ZONES = {
     "zone1_caution": {
         "x_min": 0.0,
         "x_max": 0.40,
-        "polygon": [[0, 0], [250, 0], [250, 480], [0, 480]]
+        "polygon": []
     },
     "zone2_critical": {
         "x_min": 0.60,
         "x_max": 1.0,
-        "polygon": [[380, 0], [640, 0], [640, 480], [380, 480]]
+        "polygon": []
     }
 }
 
@@ -42,6 +42,9 @@ def save_zones(caution_max, critical_min):
     data = load_zones()
     data["zone1_caution"]["x_max"] = caution_max
     data["zone2_critical"]["x_min"] = critical_min
+    # Clear previous polygon so linear sliders take immediate visual control
+    data["zone1_caution"]["polygon"] = []
+    data["zone2_critical"]["polygon"] = []
     with open(CONFIG_FILE, "w") as f:
         json.dump(data, f, indent=4)
     return data

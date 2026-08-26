@@ -6,40 +6,39 @@ class FaceEngine:
     def __init__(self, db_path="data/authorized"):
         self.db_path = db_path
         os.makedirs(self.db_path, exist_ok=True)
-        self.model_name = "VGG-Face"
+        # SFace/Facenet512 model with strict threshold
+        self.model_name = "Facenet512"
+        self.detector_backend = "opencv"
+        self.distance_metric = "cosine"
+        self.threshold = 0.38  # Strict threshold to prevent false lookalike matches
 
-    def match_face(self, person_crop):
-        if person_crop is None or person_crop.size == 0:
-            return False, "UNKNOWN INTRUDER"
+    def match_face(self, face_crop):
+        if not os.path.exists(self.db_path) or len(os.listdir(self.db_path)) == 0:
+            return False, "INTRUDER"
 
-        valid_files = [
-            os.path.join(self.db_path, f) 
-            for f in os.listdir(self.db_path) 
-            if f.lower().endswith(('.jpg', '.png', '.jpeg'))
-        ]
+        try:
+            # Run DeepFace Search with enforce_detection to ensure real face crop
+            results = DeepFace.find(
+                img_path=face_crop,
+                db_path=self.db_path,
+                model_name=self.model_name,
+                detector_backend=self.detector_backend,
+                distance_metric=self.distance_metric,
+                enforce_detection=False,
+                silent=True
+            )
 
-        if not valid_files:
-            return False, "UNKNOWN INTRUDER"
-
-        for ref_img in valid_files:
-            try:
-                # Direct in-memory array verification with skip detector
-                res = DeepFace.verify(
-                    img1_path=person_crop,
-                    img2_path=ref_img,
-                    model_name=self.model_name,
-                    detector_backend="skip",
-                    distance_metric="cosine",
-                    enforce_detection=False
-                )
+            if len(results) > 0 and not results[0].empty:
+                best_match = results[0].iloc[0]
+                distance = best_match['distance']
                 
-                dist = res.get("distance", 1.0)
-                is_verified = res.get("verified", False)
+                # Strict distance validation
+                if distance <= self.threshold:
+                    matched_file = os.path.basename(best_match['identity'])
+                    person_name = os.path.splitext(matched_file)[0].upper()
+                    return True, f"AUTHORIZED: {person_name}"
 
-                if is_verified or dist <= 0.60:
-                    raw_name = os.path.basename(ref_img).split('_')[0].split('.')[0]
-                    return True, f"AUTHORIZED: {raw_name.upper()}"
-            except Exception:
-                continue
+            return False, "INTRUDER"
 
-        return False, "UNKNOWN INTRUDER"
+        except Exception:
+            return False, "INTRUDER"

@@ -36,13 +36,53 @@ st.markdown("""
         letter-spacing: 1px;
         color: #94a3b8;
     }
+    .flash-feed {
+        border: 3px solid #ef4444 !important;
+        box-shadow: 0 0 25px rgba(239, 68, 68, 0.6);
+        animation: pulseBorder 1.5s infinite;
+    }
+    @keyframes pulseBorder {
+        0% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+        50% { box-shadow: 0 0 30px rgba(239, 68, 68, 0.85); }
+        100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar - Zone Telemetry & Controls
+# Sidebar - Video Routing & Boundary Telemetry
 st.sidebar.image("https://img.icons8.com/isometric/512/cctv.png", width=70)
 st.sidebar.title("🛡️ SOC Telemetry")
 st.sidebar.caption("Smart Spatial Threat & Identity Verification")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📹 Video Source Routing")
+
+cam_choice = st.sidebar.selectbox(
+    "Select Camera Channel:",
+    ["Default USB Cam (0)", "Secondary USB Cam (1)", "Custom IP / RTSP URL"]
+)
+
+custom_url = ""
+if cam_choice == "Custom IP / RTSP URL":
+    custom_url = st.sidebar.text_input("Stream URL:", placeholder="http://192.168.1.X:8080/video")
+
+if st.sidebar.button("🔄 Switch Camera Stream", use_container_width=True):
+    target_src = "0"
+    if "0" in cam_choice:
+        target_src = "0"
+    elif "1" in cam_choice:
+        target_src = "1"
+    elif custom_url:
+        target_src = custom_url
+
+    try:
+        res = requests.post(f"{API_BASE_URL}/switch_camera", json={"source": target_src}, timeout=4)
+        if res.status_code == 200:
+            st.sidebar.success(f"Connected to Source: {target_src}")
+        else:
+            st.sidebar.error("Failed to switch source.")
+    except Exception as e:
+        st.sidebar.error(f"Switch Error: {e}")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⚙️ Quick Linear Boundaries")
@@ -87,10 +127,10 @@ if st.sidebar.button("💾 Apply Linear Boundaries", use_container_width=True):
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📡 Engine Telemetry")
 st.sidebar.info(
-    "• Model: YOLOv8 High-Speed 80-Class\n"
-    "• Face Biometrics: DeepFace (VGG-Face)\n"
-    "• Anti-Spoofing: Motion + Haar EAR\n"
-    "• Zones: Custom Polygon & Multi-Boundary"
+    "• High-FPS Interpolated Inference\n"
+    "• Multi-Source: RTSP / IP / USB Dynamic\n"
+    "• Biometrics: Individual Facial Spatial Grid\n"
+    "• Threat Escalation: Persistent Caution & Instant Critical"
 )
 
 # Navigation Tabs
@@ -102,16 +142,16 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📐 Interactive Zone Drawer"
 ])
 
-# Tab 1: Live Stream
+# Tab 1: Live Stream with Browser Alerts
 with tab1:
     st.markdown("### Real-Time Multi-Zone Surveillance Feed")
-    st.caption("Edge YOLOv8 Detection with Graded Dual-Zone Spatial Threat Escalation.")
+    st.caption("Edge YOLOv8 Detection with Dual-Zone Spatial Threat Escalation.")
 
     col_stream, col_legend = st.columns([3, 1])
 
     with col_stream:
         st.markdown(
-            f'<div style="border: 2px solid #334155; border-radius: 8px; overflow: hidden;">'
+            f'<div class="flash-feed" style="border-radius: 8px; overflow: hidden;">'
             f'<img src="{API_BASE_URL}/video_feed" width="100%" />'
             f'</div>',
             unsafe_allow_html=True
@@ -122,7 +162,7 @@ with tab1:
         st.markdown("""
         <div style="background-color: #1e293b; padding: 12px; border-left: 5px solid #eab308; border-radius: 4px; margin-bottom: 8px;">
             <b style="color: #38bdf8;">Zone 1 (Yellow):</b><br/>
-            <span style="font-size: 13px; color: #94a3b8;">Caution / 5s Dwell Countdown Area</span>
+            <span style="font-size: 13px; color: #94a3b8;">Caution / 3s Countdown & Persistent Alert</span>
         </div>
         <div style="background-color: #1e293b; padding: 12px; border-left: 5px solid #ef4444; border-radius: 4px; margin-bottom: 8px;">
             <b style="color: #ef4444;">Zone 2 (Red):</b><br/>
@@ -138,7 +178,7 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-# Tab 2: Analytics
+# Tab 2: Threat Analytics
 with tab2:
     st.markdown("### Threat Analytics & Audit Metrics")
     try:
@@ -226,7 +266,7 @@ with tab4:
                 except Exception as e:
                     st.error(f"Backend unreachable: {e}")
 
-# Tab 5: Interactive Zone Drawer
+# Tab 5: Interactive Custom Zone Drawer
 with tab5:
     st.markdown("### 📐 Interactive Custom Zone Selector")
     st.caption("Drag your mouse directly on the canvas below to draw a custom bounding zone box.")

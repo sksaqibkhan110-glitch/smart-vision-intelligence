@@ -2,12 +2,12 @@ import cv2
 import threading
 import time
 
-class VideoCamera:
-    def __init__(self):
-        # Direct capture initialization
-        self.cap = cv2.VideoCapture(0)
-        self.ret = False
-        self.frame = None
+class CameraStream:
+    def __init__(self, src=0):
+        self.src = src
+        self.cap = cv2.VideoCapture(self.src)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.ret, self.frame = self.cap.read()
         self.running = True
         self.lock = threading.Lock()
         
@@ -18,29 +18,43 @@ class VideoCamera:
         while self.running:
             if self.cap.isOpened():
                 ret, frame = self.cap.read()
-                if ret and frame is not None and frame.size > 0:
+                if ret:
                     with self.lock:
                         self.ret = ret
-                        self.frame = frame.copy()
+                        self.frame = frame
                 else:
-                    time.sleep(0.05)
-            time.sleep(0.01)
+                    time.sleep(0.02)
+            else:
+                time.sleep(0.05)
 
     def get_frame(self):
         with self.lock:
-            if self.ret and self.frame is not None:
-                return True, self.frame.copy()
+            if self.frame is not None:
+                return self.ret, self.frame.copy()
             return False, None
+
+    def switch_source(self, new_src):
+        with self.lock:
+            self.running = False
+        if self.cap.isOpened():
+            self.cap.release()
+        
+        self.src = new_src
+        self.cap = cv2.VideoCapture(self.src)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.running = True
+        self.thread = threading.Thread(target=self._update, daemon=True)
+        self.thread.start()
 
     def release(self):
         self.running = False
         if self.cap.isOpened():
             self.cap.release()
 
-camera_instance = None
+_camera_instance = None
 
-def get_camera():
-    global camera_instance
-    if camera_instance is None:
-        camera_instance = VideoCamera()
-    return camera_instance
+def get_camera(src=0):
+    global _camera_instance
+    if _camera_instance is None:
+        _camera_instance = CameraStream(src=src)
+    return _camera_instance

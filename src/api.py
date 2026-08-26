@@ -41,6 +41,9 @@ class PolygonUpdateRequest(BaseModel):
     zone1_poly: List[List[int]]
     zone2_poly: List[List[int]]
 
+class CameraSwitchRequest(BaseModel):
+    source: str
+
 def generate_frames():
     cam = get_camera()
     detector = get_detector()
@@ -108,6 +111,15 @@ def update_polygon_zones(req: PolygonUpdateRequest):
     detector = get_detector()
     detector.reload_zones()
     return {"status": "success", "zones": saved}
+
+@app.post("/switch_camera")
+def switch_camera(req: CameraSwitchRequest):
+    src_val = req.source.strip()
+    if src_val.isdigit():
+        src_val = int(src_val)
+    cam = get_camera()
+    cam.switch_source(src_val)
+    return {"status": "success", "active_source": str(src_val)}
 
 @app.post("/register_member")
 async def register_member(name: str = Form(...), file: UploadFile = File(...)):

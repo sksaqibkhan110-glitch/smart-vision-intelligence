@@ -1,39 +1,18 @@
-# 🛡️ Smart Vision Intelligence: Edge AI Multi-Zone Threat Detection & Telemetry Platform
+# 🛡️ Edge-AI Vision Intelligence & SOC Surveillance System
 
-
-
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
-[![YOLOv8](https://img.shields.io/badge/YOLOv8-Computer_Vision-00FFFF?style=flat&logo=ultralytics)](https://github.com/ultralytics/ultralytics)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io)
-
-An end-to-end edge AI surveillance and incident response system combining real-time computer vision (YOLOv8), multi-zone spatial threat evaluation, automated async audio/Telegram alerting, SQLite audit telemetry, and a Security Operations Center (SOC) dashboard.
+A production-grade, multi-zone spatial threat detection and identity verification platform powered by **YOLOv8**, **DeepFace (Facenet512)**, **FastAPI**, and **Streamlit**.
 
 ---
 
-## 🏛️ System Architecture
+## ✨ Key Capabilities
 
-```text
-[ Live Camera Feed / Video Stream ]
-                │
-                ▼
-┌───────────────────────────────────────────────┐
-│           FastAPI Edge Engine (src/api.py)    │
-│  ┌─────────────────────────────────────────┐  │
-│  │ VisionDetector (YOLOv8n + Zone Check)   │  │
-│  └──────────────────┬──────────────────────┘  │
-│                     │                         │
-│        ┌────────────┴─────────────┐           │
-│        ▼                          ▼           │
-│  [ SQLite DB ]            [ Threaded Alert ]  │
-│  (Audit Telemetry)        ├── Siren Sound     │
-│                           └── Telegram Bot    │
-└───────────────────────┬───────────────────────┘
-                        │ MJPEG Stream & REST Endpoints
-                        ▼
-┌───────────────────────────────────────────────┐
-│     Streamlit SOC Dashboard (app.py)          │
-│   • 🔴 Real-Time Vision Feed with Overlay HUD │
-│   • 📊 Threat Analytics & Incident Charts     │
-│   • 📁 Breach Audit Logs & Forensic Records   │
-└───────────────────────────────────────────────┘
+- **Spatial Threat Matrix:** Graded Dual-Zone (Yellow Caution & Red Critical) threat tracking with interactive dynamic polygon canvas.
+- **Biometric Identity Whitelisting:** Multi-person face identification with anti-spoofing micro-liveness (Blink/Motion verification).
+- **Persistent Threat Escalation:** Continuous dwell-time tracking (3s caution debounce) and instant critical breach siren.
+- **Automated Incident Logging & Dispatch:** Real-time Telegram alert dispatches with evidence snapshots and SQLite event ledger.
+- **Multi-Source Video Switcher:** Dynamic routing across Default USB Webcams, Secondary Cameras, and remote IP/RTSP streams.
+- **High-FPS Edge Optimization:** Multi-threaded frame inference pipeline delivering 30+ FPS real-time processing.
+
+---
+
+## 🏗️ Architecture Overview

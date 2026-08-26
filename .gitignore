@@ -1,18 +1,14 @@
-# Python cache & virtual environment
+# Python & Virtual Environments
 __pycache__/
-*.pyc
+*.py[cod]
 venv/
 .env
 
-# Authorized face profiles & database
-data/authorized/
-data/alerts/
-data/siren.mp3
-*.db
-*.sqlite3
-*.pkl
-temp_test.jpg
-
-# Weights & models
+# Data & Caches
+data/alerts/*.jpg
+data/authorized/*.pkl
 *.pt
-*.h5
+*.pkl
+
+# DeepFace weights cache
+.deepface/
