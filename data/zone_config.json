@@ -1,0 +1,10 @@
+{
+    "zone1_caution": {
+        "x_min": 0.0,
+        "x_max": 0.4
+    },
+    "zone2_critical": {
+        "x_min": 0.6,
+        "x_max": 1.0
+    }
+}

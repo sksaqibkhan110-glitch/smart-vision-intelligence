@@ -1,0 +1,14 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Data & Caches
+data/alerts/*.jpg
+data/authorized/*.pkl
+*.pt
+*.pkl
+
+# DeepFace weights cache
+.deepface/
